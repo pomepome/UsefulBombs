@@ -27,6 +27,7 @@ namespace UsefulBombs
             Mon = Monitor;
 
             Cap(ref Config.DamageMultiplier, 1, 3);
+            Cap(ref Config.RadiusIncreaseRatio, 0.1f, 0.5f);
             Helper.WriteConfig(Config);
 
             HarmonyInstance harmony = HarmonyInstance.Create("punyo.usefulbombs");
@@ -70,6 +71,12 @@ namespace UsefulBombs
 
         internal static void Explode(GameLocation location, ModConfig config, Vector2 tileLocation, int radius, Farmer who)
         {
+            if (config.LargerRadius)
+            {
+                int oRadius = radius;
+                radius = (int) (radius * (1 + config.RadiusIncreaseRatio));
+                ModEntry.Mon.Log($"Radius changed from {oRadius} to {radius}", LogLevel.Trace);
+            }
             bool flag = false;
             IReflectedMethod rumbleAndFade = ModEntry.Reflection.GetMethod(location, "rumbleAndFade");
             IReflectedMethod damagePlayers = ModEntry.Reflection.GetMethod(location, "damagePlayers");
@@ -187,7 +194,7 @@ namespace UsefulBombs
                     {
                         if (location.Objects.ContainsKey(vector) && location.Objects[vector].onExplosion(who, location))
                         {
-                            if (config.CollectCrystals && location.Objects[vector].CanBeGrabbed)
+                            if (config.CollectCrystals && location.Objects.ContainsKey(vector) && location.Objects[vector].CanBeGrabbed)
                             {
                                 Game1.createObjectDebris(location.Objects[vector].ParentSheetIndex, (int)vector.X, (int)vector.Y);
                             }
