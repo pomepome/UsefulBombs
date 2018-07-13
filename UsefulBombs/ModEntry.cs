@@ -8,6 +8,7 @@ using Microsoft.Xna.Framework;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Locations;
+using StardewValley.Monsters;
 using StardewValley.TerrainFeatures;
 using StardewValley.Tools;
 using Object = StardewValley.Object;
@@ -90,6 +91,20 @@ namespace UsefulBombs
             {
                 minDamage *= config.DamageMultiplier;
                 maxDamage *= config.DamageMultiplier;
+            }
+            foreach (Monster monster in location.characters.OfType<Monster>().Where(m => m.GetBoundingBox().Intersects(rectangle)))
+            {
+                if (ModEntry.Config.CancelEnemyInvincibility)
+                {
+                    if (monster.isInvincible())
+                        monster.IsInvisible = false;
+                    if (monster.Health < minDamage && monster is Mummy mummy)
+                    {
+                        ModEntry.Reflection.GetField<int>(mummy, "reviveTimer").SetValue(10000);
+                    }
+                    if (monster is Bug bug && bug.isArmoredBug.Value)
+                        bug.isArmoredBug.Value = false;
+                }
             }
             location.damageMonster(rectangle, (int)minDamage, (int)maxDamage, true, who);
             List<TemporaryAnimatedSprite> list1 = new List<TemporaryAnimatedSprite>
