@@ -10,7 +10,6 @@ using StardewValley;
 using StardewValley.Locations;
 using StardewValley.Monsters;
 using StardewValley.TerrainFeatures;
-using StardewValley.Tools;
 using Object = StardewValley.Object;
 
 namespace UsefulBombs
@@ -66,72 +65,89 @@ namespace UsefulBombs
     {
         internal static bool Prefix(ref GameLocation __instance, ref Vector2 tileLocation, ref int radius,  ref Farmer who)
         {
-            Explode(__instance, ModEntry.Config, tileLocation, radius, who);
-            return false;
+            return Explode(__instance, ModEntry.Config, tileLocation, radius, who);
         }
 
-        internal static void Explode(GameLocation location, ModConfig config, Vector2 tileLocation, int radius, Farmer who)
+        internal static bool IsCrystals(Object obj)
         {
+            return (obj.ParentSheetIndex >= 80 && obj.ParentSheetIndex <= 86) || obj.ParentSheetIndex == 420 || obj.ParentSheetIndex == 422;
+        }
+
+        internal static bool Explode(GameLocation location, ModConfig config, Vector2 tileLocation, int radius, Farmer who)
+        {
+            if (!(location is MineShaft))
+            {
+                // Call original method when exploded outside of mines.
+                return true;
+            }
             if (config.LargerRadius)
             {
                 int oRadius = radius;
                 radius = (int) (radius * (1 + config.RadiusIncreaseRatio));
                 ModEntry.Mon.Log($"Radius changed from {oRadius} to {radius}", LogLevel.Trace);
             }
-            bool flag = false;
-            IReflectedMethod rumbleAndFade = ModEntry.Reflection.GetMethod(location, "rumbleAndFade");
-            IReflectedMethod damagePlayers = ModEntry.Reflection.GetMethod(location, "damagePlayers");
-            Multiplayer multiplayer = ModEntry.Reflection.GetField<Multiplayer>(typeof(Game1), "multiplayer").GetValue();
-            location.updateMap();
-            Vector2 vector = new Vector2(Math.Min(location.map.Layers[0].LayerWidth - 1, Math.Max(0f, tileLocation.X - radius)), Math.Min(location.Map.Layers[0].LayerHeight - 1, Math.Max(0f, tileLocation.Y - radius)));
-            bool[,] circleOutlineGrid = Game1.getCircleOutlineGrid(radius);
-            Rectangle rectangle = new Rectangle((int)(tileLocation.X - radius - 1f) * 64, (int)(tileLocation.Y - radius - 1f) * 64, (radius * 2 + 1) * 64, (radius * 2 + 1) * 64);
+            Rectangle areaOfEffect = new Rectangle((int)(tileLocation.X - radius - 1f) * 64, (int)(tileLocation.Y - radius - 1f) * 64, (radius * 2 + 1) * 64, (radius * 2 + 1) * 64);
+
             float minDamage = radius * 6, maxDamage = radius * 8;
             if (config.ModifyDamagesToEnemies)
             {
                 minDamage *= config.DamageMultiplier;
                 maxDamage *= config.DamageMultiplier;
             }
-            foreach (Monster monster in location.characters.OfType<Monster>().Where(m => m.GetBoundingBox().Intersects(rectangle)))
+
+            foreach (Monster monster in location.characters.OfType<Monster>().Where(m => m.GetBoundingBox().Intersects(areaOfEffect)))
             {
-                if (ModEntry.Config.CancelEnemyInvincibility)
+                if (config.CancelEnemyInvincibility)
                 {
-                    if (monster.isInvincible())
-                        monster.IsInvisible = false;
-                    if (monster.Health < minDamage && monster is Mummy mummy)
+                    switch (monster)
                     {
-                        ModEntry.Reflection.GetField<int>(mummy, "reviveTimer").SetValue(10000);
+                        case Bug bug:
+                            bug.isArmoredBug.Value = false;
+                            break;
+                        case Grub grub:
+                            grub.hard.Value = false;
+                            break;
                     }
-                    if (monster is Bug bug && bug.isArmoredBug.Value)
-                        bug.isArmoredBug.Value = false;
+                }
+
+                if (config.InstantKillMummies && monster is Mummy mummy && (Game1.random.NextDouble() < 0.6f + Game1.dailyLuck || mummy.Health <= minDamage))
+                {
+                    ModEntry.Mon.Log("Instant Killed Mummy");
+                    ModEntry.Reflection.GetField<int>(mummy, "reviveTimer").SetValue(10000);
                 }
             }
-            location.damageMonster(rectangle, (int)minDamage, (int)maxDamage, true, who);
-            List<TemporaryAnimatedSprite> list1 = new List<TemporaryAnimatedSprite>
+
+            IReflectedMethod rumbleAndFade = ModEntry.Reflection.GetMethod(location, "rumbleAndFade");
+            IReflectedMethod damagePlayers = ModEntry.Reflection.GetMethod(location, "damagePlayers");
+            Multiplayer multiplayer = ModEntry.Reflection.GetField<Multiplayer>(typeof(Game1), "multiplayer").GetValue();
+
+            bool insideCircle = false;
+            location.updateMap();
+            Vector2 currentTile = new Vector2(Math.Min(location.Map.Layers[0].LayerWidth - 1, Math.Max(0f, tileLocation.X - radius)), Math.Min(location.Map.Layers[0].LayerHeight - 1, Math.Max(0f, tileLocation.Y - radius)));
+            bool[,] circleOutline2 = Game1.getCircleOutlineGrid(radius);
+            location.damageMonster(areaOfEffect, (int)minDamage, (int)maxDamage, true, who);
+            /*List<TemporaryAnimatedSprite> sprites = new List<TemporaryAnimatedSprite>
             {
-                new TemporaryAnimatedSprite(23, 9999f, 6, 1, new Vector2(vector.X * 64f, vector.Y * 64f), false,
-                    Game1.random.NextDouble() < 0.5)
+                new TemporaryAnimatedSprite(23, 9999f, 6, 1, new Vector2(currentTile.X * 64f, currentTile.Y * 64f),
+                    false, Game1.random.NextDouble() < 0.5)
                 {
                     light = true,
                     lightRadius = radius,
                     lightcolor = Color.Black,
                     alphaFade = 0.03f - radius * 0.003f
                 }
-            };
-            List<TemporaryAnimatedSprite> list = list1;
-
-            rumbleAndFade?.Invoke(300 + radius * 100);
-            damagePlayers?.Invoke(rectangle, radius * 3);
-
-            for (int num = location.terrainFeatures.Count() - 1; num >= 0; num--)
+            };*/
+            var sprites = new List<TemporaryAnimatedSprite>();
+            rumbleAndFade.Invoke(300 + radius * 100);
+            damagePlayers.Invoke(areaOfEffect, radius * 3);
+            for (int n = location.terrainFeatures.Count() - 1; n >= 0; n--)
             {
-                KeyValuePair<Vector2, TerrainFeature> keyValuePair = location.terrainFeatures.Pairs.ElementAt(num);
-                if (keyValuePair.Value.getBoundingBox(keyValuePair.Key).Intersects(rectangle) && keyValuePair.Value.performToolAction(null, radius / 2, keyValuePair.Key, location))
+                KeyValuePair<Vector2, TerrainFeature> m = location.terrainFeatures.Pairs.ElementAt(n);
+                if (m.Value.getBoundingBox(m.Key).Intersects(areaOfEffect) && m.Value.performToolAction(null, radius / 2, m.Key, location))
                 {
-                    location.terrainFeatures.Remove(keyValuePair.Key);
+                    location.terrainFeatures.Remove(m.Key);
                 }
             }
-
             if (config.BreakBoulders && location is MineShaft shaft)
             {
                 for (int num = shaft.resourceClumps.Count - 1; num >= 0; num--)
@@ -144,10 +160,10 @@ namespace UsefulBombs
                         case 754:
                         case 756:
                         case 758: break;
-                        default:   continue;
+                        default: continue;
                     }
                     Vector2 vec = terrain.tile.Value;
-                    if (terrain.getBoundingBox(vec).Intersects(rectangle))
+                    if (terrain.getBoundingBox(vec).Intersects(areaOfEffect))
                     {
                         int number = (terrain.parentSheetIndex.Value == 672) ? 15 : 10;
                         if (Game1.IsMultiplayer)
@@ -164,39 +180,39 @@ namespace UsefulBombs
                     }
                 }
             }
-            for (int i = 0; i < radius * 2 + 1; i++)
+            for (int l = 0; l < radius * 2 + 1; l++)
             {
-                for (int j = 0; j < radius * 2 + 1; j++)
+                for (int i = 0; i < radius * 2 + 1; i++)
                 {
-                    if (i == 0 || j == 0 || i == radius * 2 || j == radius * 2)
+                    if (l == 0 || i == 0 || l == radius * 2 || i == radius * 2)
                     {
-                        flag = circleOutlineGrid[i, j];
+                        insideCircle = circleOutline2[l, i];
                     }
-                    else if (circleOutlineGrid[i, j])
+                    else if (circleOutline2[l, i])
                     {
-                        flag = !flag;
-                        if (!flag)
+                        insideCircle = !insideCircle;
+                        if (!insideCircle)
                         {
-                            if (location.Objects.ContainsKey(vector) && location.Objects[vector].onExplosion(who, location))
+                            if (location.Objects.ContainsKey(currentTile) && location.Objects[currentTile].onExplosion(who, location))
                             {
-                                if (config.CollectCrystals && location.Objects[vector].CanBeGrabbed)
+                                if (config.CollectCrystals && location.Objects.ContainsKey(currentTile) && IsCrystals(location.Objects[currentTile]))
                                 {
-                                    Game1.createObjectDebris(location.Objects[vector].ParentSheetIndex, (int)vector.X, (int)vector.Y);
+                                    Game1.createObjectDebris(location.Objects[currentTile].ParentSheetIndex, (int)currentTile.X, (int)currentTile.Y);
                                 }
-                                location.destroyObject(vector, who);
+                                location.destroyObject(currentTile, who);
                             }
                             if (Game1.random.NextDouble() < 0.45)
                             {
                                 if (Game1.random.NextDouble() < 0.5)
                                 {
-                                    list.Add(new TemporaryAnimatedSprite(362, Game1.random.Next(30, 90), 6, 1, new Vector2(vector.X * 64f, vector.Y * 64f), false, Game1.random.NextDouble() < 0.5)
+                                    sprites.Add(new TemporaryAnimatedSprite(362, Game1.random.Next(30, 90), 6, 1, new Vector2(currentTile.X * 64f, currentTile.Y * 64f), false, Game1.random.NextDouble() < 0.5)
                                     {
                                         delayBeforeAnimationStart = Game1.random.Next(700)
                                     });
                                 }
                                 else
                                 {
-                                    list.Add(new TemporaryAnimatedSprite(5, new Vector2(vector.X * 64f, vector.Y * 64f), Color.White, 8, false, 50f)
+                                    sprites.Add(new TemporaryAnimatedSprite(5, new Vector2(currentTile.X * 64f, currentTile.Y * 64f), Color.White, 8, false, 50f)
                                     {
                                         delayBeforeAnimationStart = Game1.random.Next(200),
                                         scale = Game1.random.Next(5, 15) / 10f
@@ -205,78 +221,79 @@ namespace UsefulBombs
                             }
                         }
                     }
-                    if (flag)
+                    if (insideCircle)
                     {
-                        if (location.Objects.ContainsKey(vector) && location.Objects[vector].onExplosion(who, location))
+                        if (location.Objects.ContainsKey(currentTile) && location.Objects[currentTile].onExplosion(who, location))
                         {
-                            if (config.CollectCrystals && location.Objects.ContainsKey(vector) && location.Objects[vector].CanBeGrabbed)
+                            if (config.CollectCrystals && location.Objects.ContainsKey(currentTile) && IsCrystals(location.Objects[currentTile]))
                             {
-                                Game1.createObjectDebris(location.Objects[vector].ParentSheetIndex, (int)vector.X, (int)vector.Y);
+                                Game1.createObjectDebris(location.Objects[currentTile].ParentSheetIndex, (int)currentTile.X, (int)currentTile.Y);
                             }
-                            location.destroyObject(vector, who);
+                            location.destroyObject(currentTile, who);
                         }
                         if (Game1.random.NextDouble() < 0.45)
                         {
                             if (Game1.random.NextDouble() < 0.5)
                             {
-                                list.Add(new TemporaryAnimatedSprite(362, Game1.random.Next(30, 90), 6, 1, new Vector2(vector.X * 64f, vector.Y * 64f), false, Game1.random.NextDouble() < 0.5)
+                                sprites.Add(new TemporaryAnimatedSprite(362, Game1.random.Next(30, 90), 6, 1, new Vector2(currentTile.X * 64f, currentTile.Y * 64f), false, Game1.random.NextDouble() < 0.5)
                                 {
                                     delayBeforeAnimationStart = Game1.random.Next(700)
                                 });
                             }
                             else
                             {
-                                list.Add(new TemporaryAnimatedSprite(5, new Vector2(vector.X * 64f, vector.Y * 64f), Color.White, 8, false, 50f)
+                                sprites.Add(new TemporaryAnimatedSprite(5, new Vector2(currentTile.X * 64f, currentTile.Y * 64f), Color.White, 8, false, 50f)
                                 {
                                     delayBeforeAnimationStart = Game1.random.Next(200),
                                     scale = Game1.random.Next(5, 15) / 10f
                                 });
                             }
                         }
-                        list.Add(new TemporaryAnimatedSprite(6, new Vector2(vector.X * 64f, vector.Y * 64f), Color.White, 8, Game1.random.NextDouble() < 0.5, Vector2.Distance(vector, tileLocation) * 20f));
+                        sprites.Add(new TemporaryAnimatedSprite(6, new Vector2(currentTile.X * 64f, currentTile.Y * 64f), Color.White, 8, Game1.random.NextDouble() < 0.5, Vector2.Distance(currentTile, tileLocation) * 20f));
                     }
-                    vector.Y += 1f;
-                    vector.Y = Math.Min(location.Map.Layers[0].LayerHeight - 1, Math.Max(0f, vector.Y));
+                    currentTile.Y += 1f;
+                    currentTile.Y = Math.Min(location.Map.Layers[0].LayerHeight - 1, Math.Max(0f, currentTile.Y));
                 }
-                vector.X += 1f;
-                vector.Y = Math.Min(location.Map.Layers[0].LayerWidth - 1, Math.Max(0f, vector.X));
-                vector.Y = tileLocation.Y - radius;
-                vector.Y = Math.Min(location.Map.Layers[0].LayerHeight - 1, Math.Max(0f, vector.Y));
+                currentTile.X += 1f;
+                currentTile.Y = Math.Min(location.Map.Layers[0].LayerWidth - 1, Math.Max(0f, currentTile.X));
+                currentTile.Y = tileLocation.Y - radius;
+                currentTile.Y = Math.Min(location.Map.Layers[0].LayerHeight - 1, Math.Max(0f, currentTile.Y));
             }
-            multiplayer.broadcastSprites(location, list);
+            multiplayer.broadcastSprites(location, sprites);
             radius /= 2;
-            circleOutlineGrid = Game1.getCircleOutlineGrid(radius);
-            vector = new Vector2((int)(tileLocation.X - radius), (int)(tileLocation.Y - radius));
+            circleOutline2 = Game1.getCircleOutlineGrid(radius);
+            currentTile = new Vector2((int)(tileLocation.X - radius), (int)(tileLocation.Y - radius));
             for (int k = 0; k < radius * 2 + 1; k++)
             {
-                for (int l = 0; l < radius * 2 + 1; l++)
+                for (int j = 0; j < radius * 2 + 1; j++)
                 {
-                    if (k == 0 || l == 0 || k == radius * 2 || l == radius * 2)
+                    if (k == 0 || j == 0 || k == radius * 2 || j == radius * 2)
                     {
-                        flag = circleOutlineGrid[k, l];
+                        insideCircle = circleOutline2[k, j];
                     }
-                    else if (circleOutlineGrid[k, l])
+                    else if (circleOutline2[k, j])
                     {
-                        flag = !flag;
-                        if (!flag && !location.Objects.ContainsKey(vector) && Game1.random.NextDouble() < 0.9 && location.doesTileHaveProperty((int)vector.X, (int)vector.Y, "Diggable", "Back") != null && !location.isTileHoeDirt(vector))
+                        insideCircle = !insideCircle;
+                        if (!insideCircle && !location.Objects.ContainsKey(currentTile) && Game1.random.NextDouble() < 0.9 && location.doesTileHaveProperty((int)currentTile.X, (int)currentTile.Y, "Diggable", "Back") != null && !location.isTileHoeDirt(currentTile))
                         {
-                            location.checkForBuriedItem((int)vector.X, (int)vector.Y, true, false);
-                            location.makeHoeDirt(vector);
+                            location.checkForBuriedItem((int)currentTile.X, (int)currentTile.Y, true, false);
+                            location.makeHoeDirt(currentTile);
                         }
                     }
-                    if (flag && !location.Objects.ContainsKey(vector) && Game1.random.NextDouble() < 0.9 && location.doesTileHaveProperty((int)vector.X, (int)vector.Y, "Diggable", "Back") != null && !location.isTileHoeDirt(vector))
+                    if (insideCircle && !location.Objects.ContainsKey(currentTile) && Game1.random.NextDouble() < 0.9 && location.doesTileHaveProperty((int)currentTile.X, (int)currentTile.Y, "Diggable", "Back") != null && !location.isTileHoeDirt(currentTile))
                     {
-                        location.checkForBuriedItem((int)vector.X, (int)vector.Y, true, false);
-                        location.makeHoeDirt(vector);
+                        location.checkForBuriedItem((int)currentTile.X, (int)currentTile.Y, true, false);
+                        location.makeHoeDirt(currentTile);
                     }
-                    vector.Y += 1f;
-                    vector.Y = Math.Min(location.Map.Layers[0].LayerHeight - 1, Math.Max(0f, vector.Y));
+                    currentTile.Y += 1f;
+                    currentTile.Y = Math.Min(location.Map.Layers[0].LayerHeight - 1, Math.Max(0f, currentTile.Y));
                 }
-                vector.X += 1f;
-                vector.Y = Math.Min(location.Map.Layers[0].LayerWidth - 1, Math.Max(0f, vector.X));
-                vector.Y = tileLocation.Y - radius;
-                vector.Y = Math.Min(location.Map.Layers[0].LayerHeight - 1, Math.Max(0f, vector.Y));
+                currentTile.X += 1f;
+                currentTile.Y = Math.Min(location.Map.Layers[0].LayerWidth - 1, Math.Max(0f, currentTile.X));
+                currentTile.Y = tileLocation.Y - radius;
+                currentTile.Y = Math.Min(location.Map.Layers[0].LayerHeight - 1, Math.Max(0f, currentTile.Y));
             }
+            return false;
         }
     }
 }
